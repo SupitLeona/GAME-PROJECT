@@ -1,0 +1,254 @@
+import pygame
+import random
+import sys
+import math
+
+# ---------- CONFIG ----------
+WINDOW_WIDTH = 800
+WINDOW_HEIGHT = 650
+FPS = 5
+
+PLAY_SIZE = 500
+PLAY_MARGIN_TOP = 80
+PLAY_BORDER = 12
+
+CELL_SIZE = 28
+GRID_COLS = (PLAY_SIZE - 2 * PLAY_BORDER) // CELL_SIZE
+GRID_ROWS = (PLAY_SIZE - 2 * PLAY_BORDER) // CELL_SIZE
+
+# Warna
+COLOR_BG = (25, 25, 25)
+COLOR_PLAY_BG = (15, 15, 15)
+COLOR_BORDER = (80, 80, 80)
+COLOR_GRID = (50, 50, 50)
+
+COLOR_SNAKE_HEAD = (60, 200, 120)
+COLOR_SNAKE_BODY = (40, 160, 90)
+
+COLOR_TITLE = (240, 240, 240)
+COLOR_SCORE = (210, 210, 210)
+
+pygame.init()
+screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+pygame.display.set_caption("Snake Game - Enhanced Edition")
+clock = pygame.time.Clock()
+
+TITLE_FONT = pygame.font.SysFont("arial", 55, bold=True)
+SCORE_FONT = pygame.font.SysFont("arial", 24)
+INFO_FONT = pygame.font.SysFont("arial", 20)
+
+play_x = (WINDOW_WIDTH - PLAY_SIZE) // 2
+play_y = PLAY_MARGIN_TOP
+
+# Load images food
+food_images = [
+    pygame.transform.scale(pygame.image.load("apple.png"), (CELL_SIZE, CELL_SIZE)),
+    pygame.transform.scale(pygame.image.load("burger.png"), (CELL_SIZE, CELL_SIZE)),
+    pygame.transform.scale(pygame.image.load("pizza.png"), (CELL_SIZE, CELL_SIZE)),
+    pygame.transform.scale(pygame.image.load("pisang.png"), (CELL_SIZE, CELL_SIZE)),
+]
+
+# ---------- HELPERS ----------
+def grid_to_pixel(c, r):
+    return play_x + PLAY_BORDER + c * CELL_SIZE, play_y + PLAY_BORDER + r * CELL_SIZE
+
+def random_food_position(snake):
+    all_pos = [(c, r) for c in range(GRID_COLS) for r in range(GRID_ROWS)]
+    available = list(set(all_pos) - set(snake))
+    return random.choice(available)
+
+# ---------- STATE ----------
+def new_game():
+    start = (GRID_COLS // 2, GRID_ROWS // 2)
+    return {
+        "snake": [start],
+        "dir": (1, 0),
+        "food": {"pos": random_food_position([start]), "img": random.choice(food_images)},
+        "score": 0,
+        "paused": False,
+        "game_over": False,
+        "glow_phase": 0,
+    }
+
+state = new_game()
+
+OPPOSITE = {(1, 0): (-1, 0), (-1, 0): (1, 0), (0, 1): (0, -1), (0, -1): (0, 1)}
+
+# ---------- DRAW ----------
+def draw_background():
+    screen.fill(COLOR_BG)
+
+def draw_title():
+    t = TITLE_FONT.render("Snake Game", True, COLOR_TITLE)
+    screen.blit(t, t.get_rect(center=(WINDOW_WIDTH // 2, 40)))
+
+def draw_play_area():
+    # border
+    pygame.draw.rect(screen, COLOR_BORDER, (play_x, play_y, PLAY_SIZE, PLAY_SIZE), border_radius=15)
+    
+    # inside
+    inner = pygame.Rect(
+        play_x + PLAY_BORDER, play_y + PLAY_BORDER,
+        PLAY_SIZE - 2 * PLAY_BORDER, PLAY_SIZE - 2 * PLAY_BORDER
+    )
+    pygame.draw.rect(screen, COLOR_PLAY_BG, inner, border_radius=10)
+
+    # grid lines
+    for c in range(GRID_COLS + 1):
+        x = play_x + PLAY_BORDER + c * CELL_SIZE
+        pygame.draw.line(screen, COLOR_GRID, (x, play_y + PLAY_BORDER), (x, play_y + PLAY_SIZE - PLAY_BORDER), 1)
+
+    for r in range(GRID_ROWS + 1):
+        y = play_y + PLAY_BORDER + r * CELL_SIZE
+        pygame.draw.line(screen, COLOR_GRID, (play_x + PLAY_BORDER, y), (play_x + PLAY_SIZE - PLAY_BORDER, y), 1)
+
+def draw_snake(snake):
+    for i, (c, r) in enumerate(snake):
+        px, py = grid_to_pixel(c, r)
+
+        # gradient (ekor lebih gelap)
+        t = i / max(1, len(snake) - 1)
+        body_color = (
+            COLOR_SNAKE_BODY[0] + int((COLOR_SNAKE_HEAD[0] - COLOR_SNAKE_BODY[0]) * t),
+            COLOR_SNAKE_BODY[1] + int((COLOR_SNAKE_HEAD[1] - COLOR_SNAKE_BODY[1]) * t),
+            COLOR_SNAKE_BODY[2] + int((COLOR_SNAKE_HEAD[2] - COLOR_SNAKE_BODY[2]) * t),
+        )
+
+        rect = pygame.Rect(px, py, CELL_SIZE - 2, CELL_SIZE - 2)
+
+        # shadow
+        pygame.draw.rect(screen, (0, 0, 0), (px + 2, py + 2, CELL_SIZE - 2, CELL_SIZE - 2), border_radius=6)
+
+        # body
+        pygame.draw.rect(screen, body_color, rect, border_radius=8)
+
+        # head eyes
+        if i == len(snake) - 1:
+        
+            eye = CELL_SIZE // 6
+            pygame.draw.circle(screen, (20, 20, 20), (px + CELL_SIZE - eye*2, py + eye*2), eye)
+
+def draw_food(state):
+    pos = state["food"]["pos"]
+    if not pos:
+        return
+
+    px, py = grid_to_pixel(*pos)
+
+    # glow animation
+    glow = 8 + int(abs(math.sin(state["glow_phase"])) * 12)
+    glow_color = (200, 200, 200)
+
+    pygame.draw.circle(screen, glow_color, (px + CELL_SIZE//2, py + CELL_SIZE//2), glow)
+
+    # shadow
+    pygame.draw.circle(screen, (10, 10, 10), (px + CELL_SIZE//2 + 2, py + CELL_SIZE//2 + 2), CELL_SIZE//2)
+
+    screen.blit(state["food"]["img"], (px, py))
+
+def draw_score(score):
+    s = SCORE_FONT.render(f"Score: {score}", True, COLOR_SCORE)
+    screen.blit(s, (play_x + 10, play_y + 10))
+
+def draw_info(paused, game_over):
+    if paused:
+        msg = "PAUSED - P untuk lanjut"
+    elif game_over:
+        msg = "GAME OVER - R untuk restart"
+    else:
+        msg = "WASD/Panah = Arah | P = Pause | R = Restart | ESC = Keluar"
+
+    t = INFO_FONT.render(msg, True, COLOR_SCORE)
+    screen.blit(t, (WINDOW_WIDTH // 2 - t.get_width() // 2, play_y + PLAY_SIZE + 20))
+
+# ---------- UPDATE ----------
+def update(state):
+    if state["paused"] or state["game_over"]:
+        return
+
+    snake = state["snake"]
+    dx, dy = state["dir"]
+    head = snake[-1]
+    new_head = (head[0] + dx, head[1] + dy)
+
+    # wall collision
+    if not (0 <= new_head[0] < GRID_COLS and 0 <= new_head[1] < GRID_ROWS):
+        state["game_over"] = True
+        return
+
+    # self collision
+    if new_head in snake:
+        state["game_over"] = True
+        return
+
+    snake.append(new_head)
+
+    # eat
+    if new_head == state["food"]["pos"]:
+        state["score"] += 1
+        state["food"]["pos"] = random_food_position(snake)
+        state["food"]["img"] = random.choice(food_images)
+    else:
+        snake.pop(0)
+
+    # update glow animation
+    state["glow_phase"] += 0.15
+
+# ---------- INPUT ----------
+def handle_key(event, state):
+    if event.key == pygame.K_ESCAPE:
+        pygame.quit()
+        sys.exit()
+
+    if event.key == pygame.K_p:
+        state["paused"] = not state["paused"]
+
+    if event.key == pygame.K_r:
+        new = new_game()
+        state.update(new)
+        return
+
+    if state["paused"] or state["game_over"]:
+        return
+
+    key_map = {
+        pygame.K_LEFT: (-1, 0), pygame.K_a: (-1, 0),
+        pygame.K_RIGHT: (1, 0), pygame.K_d: (1, 0),
+        pygame.K_UP: (0, -1), pygame.K_w: (0, -1),
+        pygame.K_DOWN: (0, 1), pygame.K_s: (0, 1),
+    }
+
+    if event.key in key_map:
+        nd = key_map[event.key]
+        if nd != OPPOSITE[state["dir"]]:
+            state["dir"] = nd
+
+# ---------- MAIN LOOP ----------
+def main_loop():
+    tick = 0
+    while True:
+        dt = clock.tick(60)
+
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if e.type == pygame.KEYDOWN:
+                handle_key(e, state)
+
+        tick += 1
+        if tick >= int(60 / FPS):
+            update(state)
+            tick = 0
+
+        draw_background()
+        draw_title()
+        draw_play_area()
+        draw_snake(state["snake"])
+        draw_food(state)
+        draw_score(state["score"])
+        draw_info(state["paused"], state["game_over"])
+        pygame.display.flip()
+
+if __name__ == "__main__":
+    main_loop()
